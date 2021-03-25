@@ -1,0 +1,20 @@
+name: tag release
+
+on:
+  release:
+    types: [created]
+
+jobs:
+  deploy_to_test:
+    runs-on: [self-hosted, linux]
+    steps:
+      - uses: actions/checkout@v2
+
+      - run: yarn
+
+      - name: publish
+        run: yarn publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_AUTH_TOKEN }}
+
+
