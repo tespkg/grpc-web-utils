@@ -10,6 +10,9 @@ jobs:
     steps:
       - uses: actions/checkout@v2
 
+      - name: Install Yarn
+        run: npm install -g yarn
+
       - run: yarn
 
       - name: publish
