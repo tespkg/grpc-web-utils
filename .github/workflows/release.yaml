@@ -5,7 +5,7 @@ on:
     types: [created]
 
 jobs:
-  deploy_to_test:
+  publish_npm:
     runs-on: [self-hosted, linux]
     steps:
       - uses: actions/checkout@v2
