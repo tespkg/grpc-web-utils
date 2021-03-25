@@ -1,21 +1,28 @@
 import * as grpcWeb from "grpc-web";
-import { EventType } from "./common";
-
-export type MetadataWithSignal = {
-  signal?: AbortSignal;
-} & grpcWeb.Metadata;
-
-// const getAuthToken = () => "";
+import { EventType, isGrpcWebError } from "./common";
 
 export class AuthStreamInterceptor<
   REQ extends grpcWeb.Request<REQ, RESP>,
   RESP = any
 > {
+  private onUnauthenticated: () => void;
+  private getToken: () => string;
+
+  constructor(onUnauthenticated: () => void, getToken: () => string) {
+    this.onUnauthenticated = onUnauthenticated;
+    this.getToken = getToken;
+  }
+
   Intercept = class {
     stream: grpcWeb.ClientReadableStream<RESP>;
+    onUnauthenticated: () => void;
 
-    constructor(stream: grpcWeb.ClientReadableStream<RESP>) {
+    constructor(
+      stream: grpcWeb.ClientReadableStream<RESP>,
+      onUnauthenticated: () => void
+    ) {
       this.stream = stream;
+      this.onUnauthenticated = onUnauthenticated;
     }
 
     on<F extends Function>(eventType: EventType, callback: F) {
@@ -53,89 +60,37 @@ export class AuthStreamInterceptor<
       metadata?: grpcWeb.Metadata
     ) => grpcWeb.ClientReadableStream<RESP>
   ) {
+    const md = request.getMetadata();
+    md["Authorization"] = `Bearer ${this.getToken()}`;
     const stream = invoker(request);
-    const newStream = new this.Intercept(stream);
+    const newStream = new this.Intercept(stream, this.onUnauthenticated);
     return newStream;
   }
 }
 
-// class UnaryAuthInterceptor<
-//   REQ extends grpcWeb.Request,
-//   RESP extends grpcWeb.UnaryResponse<REQ>
-// > {
-//   async intercept(request: REQ, invoker: (request: REQ) => Promise<RESP>) {
-//     const md = request.getMetadata();
-//     md["Authorization"] = `Bearer ${getAuthToken()}`;
-//     if (process.env.NODE_ENV === "development") {
-//       if (!disable)
-//         console.log(
-//           "grpc-web request:",
-//           request.getRequestMessage()?.toObject(),
-//           "metadata:",
-//           md
-//         );
-//     }
-//     // cancellation
-//     // const signal = md.signal // UnaryCall doesn't allow cancellation
-//     delete md.signal;
-//     try {
-//       const resp = await invoker(request);
-//       if (process.env.NODE_ENV === "development") {
-//         if (!disable)
-//           console.log("grpc-web unary response:", resp.getResponseMessage());
-//       }
-//       return resp;
-//     } catch (e) {
-//       if (process.env.NODE_ENV === "development") {
-//         if (!disable) console.log("grpc-web unary error", e);
-//       }
-//       throw e;
-//     }
-//   }
-// }
+export class AuthUnaryInterceptor<
+  REQ extends grpcWeb.Request<REQ, RESP>,
+  RESP extends grpcWeb.UnaryResponse<REQ, RESP>
+> {
+  private onUnauthenticated: () => void;
+  private getToken: () => string;
 
-// const options = {
-//   streamInterceptors: [new AuthInterceptor()],
-//   unaryInterceptors: [new UnaryAuthInterceptor()],
-// };
+  constructor(onUnauthenticated: () => void, getToken: () => string) {
+    this.onUnauthenticated = onUnauthenticated;
+    this.getToken = getToken;
+  }
 
-// const statusCodeNames = Object.entries(grpcWeb.StatusCode).reduce(
-//   (acc, [k, v]) => {
-//     acc[v] = k;
-//     return acc;
-//   },
-//   {} as { [code: number]: string }
-// );
-
-// // see https://jackieli.dev/posts/grpc-web-interceptor/ for the journey on why
-// export const createPromiseClient = <PromiseClient, RpcClient = unknown>(
-//   client: RpcClient
-// ): PromiseClient => {
-//   const methods = Object.getPrototypeOf(client);
-//   return Object.keys(methods).reduce((acc, method) => {
-//     const rpc = methods[method].bind(client);
-//     if (rpc.length < 3) {
-//       // streaming method only has 2 arguments
-//       acc[method] = rpc;
-//     } else {
-//       acc[method] = (request: any, metadata?: grpcWeb.Metadata) =>
-//         new Promise((resolve, reject) => {
-//           rpc(request, metadata, (err: grpcWeb.Error, resp: any) => {
-//             if (err) {
-//               // TODO: somehow other properties of the error are overwritten down the chain, we need to find where
-//               // here we manually set the message if it's empty
-//               if (!err.message) {
-//                 err.message = `server returned status ${
-//                   statusCodeNames[err.code]
-//                 } with empty message`;
-//               }
-//               reject(err);
-//               return;
-//             }
-//             resolve(resp);
-//           });
-//         });
-//     }
-//     return acc;
-//   }, {} as any);
-// };
+  async intercept(request: REQ, invoker: (request: REQ) => Promise<RESP>) {
+    const md = request.getMetadata();
+    md["Authorization"] = `Bearer ${this.getToken()}`;
+    try {
+      const resp = await invoker(request);
+      return resp;
+    } catch (e) {
+      if (isGrpcWebError(e) && e.code === grpcWeb.StatusCode.UNAUTHENTICATED) {
+        this.onUnauthenticated();
+      }
+      throw e;
+    }
+  }
+}
