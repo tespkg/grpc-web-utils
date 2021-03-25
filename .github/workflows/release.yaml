@@ -34,7 +34,8 @@ jobs:
           echo "@target-energysolutions:registry=https://registry.npmjs.org/" > .npmrc
           echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_AUTH_TOKEN }}" >> .npmrc
 
-      - run: yarn
+      - name: Install Deps
+        run: yarn install --pure-lockfile
 
       - name: publish
         run: yarn publish --no-git-tag-version
